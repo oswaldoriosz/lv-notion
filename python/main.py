@@ -4,7 +4,7 @@ from fastapi_mcp import FastApiMCP
 from fastapi.security import APIKeyHeader
 import uvicorn
 import notion_hex
-from config import AZURE_OPENAI_KEY, AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_DEPLOYMENT_NAME, AZURE_OPENAI_API_VERSION, API_KEY
+from config import NOTION_API_TOKEN, AZURE_OPENAI_KEY, AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_DEPLOYMENT_NAME, AZURE_OPENAI_API_VERSION, API_KEY, NOTION_CLIENT_ID, NOTION_CLIENT_SECRET, NOTION_REDIRECT_URI
 import openai
 import json
 import os
@@ -19,9 +19,6 @@ app = FastAPI(title="Notion MCP API", description="Servidor MCP para interactuar
 app.add_middleware(SessionMiddleware, secret_key=secrets.token_hex(16))
 
 # Configuración de OAuth
-NOTION_CLIENT_ID = os.getenv("NOTION_CLIENT_ID")
-NOTION_CLIENT_SECRET = os.getenv("NOTION_CLIENT_SECRET")
-NOTION_REDIRECT_URI = os.getenv("NOTION_REDIRECT_URI")
 AUTH_URL = "https://api.notion.com/v1/oauth/authorize"
 TOKEN_URL = "https://api.notion.com/v1/oauth/token"
 API_VERSION = "2022-06-28"
@@ -49,7 +46,7 @@ except Exception as e:
 # Autenticación con API Key (respaldo)
 api_key_header = APIKeyHeader(name="X-API-Key")
 async def verify_api_key(api_key: str = Depends(api_key_header)):
-    if api_key != os.getenv("API_KEY"):
+    if api_key != API_KEY:
         raise HTTPException(status_code=401, detail="Clave API inválida")
 
 # Obtener token de la sesión
@@ -58,7 +55,6 @@ async def get_token(request: Request):
     if not token:
         raise HTTPException(status_code=401, detail="No autorizado. Por favor inicie sesión.")
     return token
-
 
 def parse_notion_command2(prompt: str) -> Dict[str, Any]:
     """Azure OpenAI para parsear comandos en lenguaje natural a parámetros de la API de Notion"""
@@ -152,27 +148,6 @@ async def logout(request: Request):
         del request.session["notion_token"]
     return {"message": "Sesión cerrada exitosamente"}
 
-"""
-@app.post("/notion/chat", operation_id="process_notion_chat", dependencies=[Depends(get_token)])
-async def process_notion_chat(command: str = Form(...), token: str = Depends(get_token)):
-    Procesa un comando en lenguaje natural en español o inglés para la API de Notion
-    try:
-        # Actualizar notion_client con el token de la sesión
-        notion_client.api_token = token
-        parsed_command = parse_notion_command(command)
-        print("Parsed command:", parsed_command)
-        action = getattr(notion_hex.NotionAction, parsed_command["action"])
-        params = parsed_command["params"]
-        print("Params passed to execute:", params)
-        result = notion_client.execute({"action": action, "params": params})
-        print("Raw result from execute:", result)
-        return json.loads(result)
-    except json.JSONDecodeError as e:
-        print("JSON Decode Error:", result)
-        raise HTTPException(status_code=400, detail=f"Error parsing JSON body: {str(e)}")
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Error procesando el comando: {str(e)}")
-"""
 @app.post("/notion/chat", operation_id="process_notion_chat", dependencies=[Depends(get_token)])
 async def process_notion_chat(command: str = Form(...), token: str = Depends(get_token)):
     print(f"Token recibido: {token}")  # Depuración

@@ -1,0 +1,59 @@
+#!/bin/bash
+# Script de ensamblaje para S2I
+
+# Verificar dependencias del sistema
+if [ ! -f "/usr/include/python3.12/Python.h" ]; then
+    echo "Error: Python.h not found. Ensure python3-devel is installed in the builder image."
+    exit 1
+fi
+if ! command -v g++ >/dev/null 2>&1; then
+    echo "Error: g++ not found. Ensure gcc-c++ is installed in the builder image."
+    exit 1
+fi
+if ! command -v make >/dev/null 2>&1; then
+    echo "Error: make not found. Ensure make is installed in the builder image."
+    exit 1
+fi
+
+# Change to source directory
+cd /tmp/src
+
+# List contents of /tmp/src for debugging
+echo "Contenido de /tmp/src:"
+ls -la /tmp/src
+
+# Copy Python files to /opt/app-root/src
+echo "Copiando archivos .py a /opt/app-root/src/"
+cp -v /tmp/src/*.py /opt/app-root/src/ || echo "No se encontraron archivos .py en /tmp/src"
+
+# Copy requirements.txt if exists
+if [ -f /tmp/src/requirements.txt ]; then
+    echo "Copiando requirements.txt a /opt/app-root/src/"
+    cp -v /tmp/src/requirements.txt /opt/app-root/src/
+    python3.12 -m pip install -r /opt/app-root/src/requirements.txt || { echo "Error installing Python dependencies"; exit 1; }
+fi
+
+# Compile notion_hex.so
+echo "Compilando notion_hex.so..."
+g++ -shared -fPIC -o /opt/app-root/src/python/notion_hex.so \
+    /opt/app-root/src/cpp/NotionRestAdapter.cpp \
+    /opt/app-root/src/cpp/bindings.cpp \
+    -I/opt/app-root/src/cpp \
+    -I/usr/include/python3.12 \
+    -I/opt/app-root/lib64/python3.12/site-packages/pybind11/include \
+    -I/usr/include \
+    -I/opt/app-root/src/include/nlohmann \
+    -I/opt/app-root/src/include/httplib \
+    -L/opt/app-root/lib64 \
+    -L/usr/lib64 \
+    -std=c++17 \
+    -O3 \
+    -Wall \
+    -Wl,-rpath,/opt/app-root/lib64 || { echo "Error compiling notion_hex.so"; exit 1; }
+
+# Set permissions for /opt/app-root/src
+chown -R 1001:0 /opt/app-root/src
+chmod -R g+rw /opt/app-root/src
+
+echo "Assemble completado exitosamente."
+touch /opt/app-root/src/.s2i

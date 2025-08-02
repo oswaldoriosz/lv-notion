@@ -3,7 +3,6 @@
 
 #include <string>
 #include <map>
-#include <httplib.h> // Nueva inclusión para cpp-httplib
 
 enum class NotionAction {
     GET_DATABASE,
@@ -33,10 +32,10 @@ class NotionRestAdapter {
 public:
     NotionRestAdapter();
     std::string execute(const NotionCommand& command);
-    void set_api_token(const std::string& token); // Nuevo método
+    void set_api_token(const std::string& token); // Método para establecer el token
 private:
     std::string api_token;
-    std::string performRequest(const std::string& url, const std::string& method, const std::string& data);
+    std::string buildCommandJson(const NotionCommand& command); // Nueva función para construir JSON
 };
 
 #endif

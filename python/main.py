@@ -4,7 +4,7 @@ from fastapi_mcp import FastApiMCP
 from fastapi.security import APIKeyHeader
 import uvicorn
 import notion_hex
-from config import NOTION_API_TOKEN, AZURE_OPENAI_KEY, AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_DEPLOYMENT_NAME, AZURE_OPENAI_API_VERSION, API_KEY, NOTION_CLIENT_ID, NOTION_CLIENT_SECRET, NOTION_REDIRECT_URI
+from config import AZURE_OPENAI_KEY, AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_DEPLOYMENT_NAME, AZURE_OPENAI_API_VERSION, API_KEY, NOTION_API_TOKEN, NOTION_CLIENT_ID, NOTION_CLIENT_SECRET, NOTION_REDIRECT_URI
 import openai
 import json
 import os
@@ -46,7 +46,7 @@ except Exception as e:
 # Autenticación con API Key (respaldo)
 api_key_header = APIKeyHeader(name="X-API-Key")
 async def verify_api_key(api_key: str = Depends(api_key_header)):
-    if api_key != API_KEY:
+    if api_key != os.getenv("API_KEY"):
         raise HTTPException(status_code=401, detail="Clave API inválida")
 
 # Obtener token de la sesión
@@ -90,6 +90,33 @@ def parse_notion_command(prompt: str) -> Dict[str, Any]:
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Error en Azure OpenAI: {str(e)}")
 
+def make_notion_request(command_json: Dict[str, Any], token: str) -> Dict[str, Any]:
+    """Realiza una petición a la API de Notion usando requests basado en el JSON devuelto por C++"""
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Notion-Version": "2022-06-28",
+        "Content-Type": "application/json"
+    }
+
+    url = command_json.get("url")
+    method = command_json.get("method")
+    data = command_json.get("data")
+
+    try:
+        if method == "GET":
+            response = requests.get(url, headers=headers)
+        elif method == "POST":
+            response = requests.post(url, headers=headers, data=data)
+        elif method == "PATCH":
+            response = requests.patch(url, headers=headers, data=data)
+        elif method == "DELETE":
+            response = requests.delete(url, headers=headers)
+
+        response.raise_for_status()
+        return response.json()
+    except requests.exceptions.RequestException as e:
+        raise HTTPException(status_code=getattr(e.response, 'status_code', 400), detail=str(e))
+
 @app.get("/")
 async def index():
     return {"message": "Bienvenido a la API de integración con Notion", "login_url": "/login"}
@@ -125,7 +152,7 @@ async def callback(request: Request, code: str, state: Optional[str] = None):
 
     response = requests.post(
         TOKEN_URL,
-        json=token_data,  # Cambiado de data= a json= para enviar JSON válido
+        json=token_data,
         auth=(NOTION_CLIENT_ID, NOTION_CLIENT_SECRET),
         headers={"Content-Type": "application/json"}
     )
@@ -160,12 +187,13 @@ async def process_notion_chat(command: str = Form(...), token: str = Depends(get
         execute_params = {
             "action": action,
             "params": params,
-            "token": token  # Pasar el token como campo "token"
+            "token": token
         }
         print(f"Execute params: {execute_params}")  # Depuración adicional
-        result = notion_client.execute(execute_params)
+        command_json = json.loads(notion_client.execute(execute_params))
+        result = make_notion_request(command_json, token)
         print("Raw result from execute:", result)
-        return json.loads(result)
+        return result
     except json.JSONDecodeError as e:
         print("JSON Decode Error:", result)
         raise HTTPException(status_code=400, detail=f"Error parsing JSON body: {str(e)}")
@@ -177,9 +205,10 @@ async def process_notion_chat(command: str = Form(...), token: str = Depends(get
 async def get_notion_database(database_id: str, token: str = Depends(get_token)):
     """Obtiene una base de datos de Notion por ID"""
     try:
-        notion_client.api_token = token
-        result = notion_client.execute({"action": notion_hex.NotionAction.GET_DATABASE, "params": {"database_id": database_id}})
-        return json.loads(result)
+        command = {"action": notion_hex.NotionAction.GET_DATABASE, "params": {"database_id": database_id}, "token": token}
+        command_json = json.loads(notion_client.execute(command))
+        result = make_notion_request(command_json, token)
+        return result
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -187,9 +216,10 @@ async def get_notion_database(database_id: str, token: str = Depends(get_token))
 async def query_notion_database(database_id: str, filter: str = Form(default="{}"), token: str = Depends(get_token)):
     """Consulta una base de datos de Notion"""
     try:
-        notion_client.api_token = token
-        result = notion_client.execute({"action": notion_hex.NotionAction.QUERY_DATABASE, "params": {"database_id": database_id, "filter": filter}})
-        return json.loads(result)
+        command = {"action": notion_hex.NotionAction.QUERY_DATABASE, "params": {"database_id": database_id, "filter": filter}, "token": token}
+        command_json = json.loads(notion_client.execute(command))
+        result = make_notion_request(command_json, token)
+        return result
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -197,9 +227,10 @@ async def query_notion_database(database_id: str, filter: str = Form(default="{}
 async def create_notion_page(database_id: str, title: str = Form(...), token: str = Depends(get_token)):
     """Crea una nueva página en una base de datos de Notion"""
     try:
-        notion_client.api_token = token
-        result = notion_client.execute({"action": notion_hex.NotionAction.CREATE_PAGE, "params": {"database_id": database_id, "title": title}})
-        return json.loads(result)
+        command = {"action": notion_hex.NotionAction.CREATE_PAGE, "params": {"parent_id": database_id, "title": title}, "token": token}
+        command_json = json.loads(notion_client.execute(command))
+        result = make_notion_request(command_json, token)
+        return result
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -207,9 +238,10 @@ async def create_notion_page(database_id: str, title: str = Form(...), token: st
 async def retrieve_notion_page(page_id: str, token: str = Depends(get_token)):
     """Obtiene una página de Notion por ID"""
     try:
-        notion_client.api_token = token
-        result = notion_client.execute({"action": notion_hex.NotionAction.RETRIEVE_PAGE, "params": {"page_id": page_id}})
-        return json.loads(result)
+        command = {"action": notion_hex.NotionAction.RETRIEVE_PAGE, "params": {"page_id": page_id}, "token": token}
+        command_json = json.loads(notion_client.execute(command))
+        result = make_notion_request(command_json, token)
+        return result
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -217,9 +249,10 @@ async def retrieve_notion_page(page_id: str, token: str = Depends(get_token)):
 async def update_notion_page(page_id: str, properties: str = Form(...), token: str = Depends(get_token)):
     """Actualiza una página de Notion"""
     try:
-        notion_client.api_token = token
-        result = notion_client.execute({"action": notion_hex.NotionAction.UPDATE_PAGE, "params": {"page_id": page_id, "properties": properties}})
-        return json.loads(result)
+        command = {"action": notion_hex.NotionAction.UPDATE_PAGE, "params": {"page_id": page_id, "properties": properties}, "token": token}
+        command_json = json.loads(notion_client.execute(command))
+        result = make_notion_request(command_json, token)
+        return result
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -227,9 +260,10 @@ async def update_notion_page(page_id: str, properties: str = Form(...), token: s
 async def retrieve_notion_block(block_id: str, token: str = Depends(get_token)):
     """Obtiene un bloque de Notion por ID"""
     try:
-        notion_client.api_token = token
-        result = notion_client.execute({"action": notion_hex.NotionAction.RETRIEVE_BLOCK, "params": {"block_id": block_id}})
-        return json.loads(result)
+        command = {"action": notion_hex.NotionAction.RETRIEVE_BLOCK, "params": {"block_id": block_id}, "token": token}
+        command_json = json.loads(notion_client.execute(command))
+        result = make_notion_request(command_json, token)
+        return result
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -237,9 +271,10 @@ async def retrieve_notion_block(block_id: str, token: str = Depends(get_token)):
 async def append_notion_block_children(block_id: str, children: str = Form(...), token: str = Depends(get_token)):
     """Agrega hijos a un bloque de Notion"""
     try:
-        notion_client.api_token = token
-        result = notion_client.execute({"action": notion_hex.NotionAction.APPEND_BLOCK_CHILDREN, "params": {"block_id": block_id, "children": children}})
-        return json.loads(result)
+        command = {"action": notion_hex.NotionAction.APPEND_BLOCK_CHILDREN, "params": {"block_id": block_id, "children": children}, "token": token}
+        command_json = json.loads(notion_client.execute(command))
+        result = make_notion_request(command_json, token)
+        return result
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -247,9 +282,10 @@ async def append_notion_block_children(block_id: str, children: str = Form(...),
 async def update_notion_block(block_id: str, block_data: str = Form(...), token: str = Depends(get_token)):
     """Actualiza un bloque de Notion"""
     try:
-        notion_client.api_token = token
-        result = notion_client.execute({"action": notion_hex.NotionAction.UPDATE_BLOCK, "params": {"block_id": block_id, "block_data": block_data}})
-        return json.loads(result)
+        command = {"action": notion_hex.NotionAction.UPDATE_BLOCK, "params": {"block_id": block_id, "block_data": block_data}, "token": token}
+        command_json = json.loads(notion_client.execute(command))
+        result = make_notion_request(command_json, token)
+        return result
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -257,9 +293,10 @@ async def update_notion_block(block_id: str, block_data: str = Form(...), token:
 async def delete_notion_block(block_id: str, token: str = Depends(get_token)):
     """Elimina un bloque de Notion"""
     try:
-        notion_client.api_token = token
-        result = notion_client.execute({"action": notion_hex.NotionAction.DELETE_BLOCK, "params": {"block_id": block_id}})
-        return json.loads(result)
+        command = {"action": notion_hex.NotionAction.DELETE_BLOCK, "params": {"block_id": block_id}, "token": token}
+        command_json = json.loads(notion_client.execute(command))
+        result = make_notion_request(command_json, token)
+        return result
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -267,9 +304,10 @@ async def delete_notion_block(block_id: str, token: str = Depends(get_token)):
 async def search_notion(query: str = Form(...), token: str = Depends(get_token)):
     """Busca contenido en Notion"""
     try:
-        notion_client.api_token = token
-        result = notion_client.execute({"action": notion_hex.NotionAction.SEARCH, "params": {"query": query}})
-        return json.loads(result)
+        command = {"action": notion_hex.NotionAction.SEARCH, "params": {"query": query}, "token": token}
+        command_json = json.loads(notion_client.execute(command))
+        result = make_notion_request(command_json, token)
+        return result
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -277,9 +315,10 @@ async def search_notion(query: str = Form(...), token: str = Depends(get_token))
 async def get_notion_users(token: str = Depends(get_token)):
     """Obtiene todos los usuarios de Notion"""
     try:
-        notion_client.api_token = token
-        result = notion_client.execute({"action": notion_hex.NotionAction.GET_USERS, "params": {}})
-        return json.loads(result)
+        command = {"action": notion_hex.NotionAction.GET_USERS, "params": {}, "token": token}
+        command_json = json.loads(notion_client.execute(command))
+        result = make_notion_request(command_json, token)
+        return result
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -287,9 +326,10 @@ async def get_notion_users(token: str = Depends(get_token)):
 async def get_notion_user(user_id: str, token: str = Depends(get_token)):
     """Obtiene un usuario de Notion por ID"""
     try:
-        notion_client.api_token = token
-        result = notion_client.execute({"action": notion_hex.NotionAction.GET_USER, "params": {"user_id": user_id}})
-        return json.loads(result)
+        command = {"action": notion_hex.NotionAction.GET_USER, "params": {"user_id": user_id}, "token": token}
+        command_json = json.loads(notion_client.execute(command))
+        result = make_notion_request(command_json, token)
+        return result
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -297,9 +337,10 @@ async def get_notion_user(user_id: str, token: str = Depends(get_token)):
 async def get_notion_me(token: str = Depends(get_token)):
     """Obtiene el usuario actual de Notion"""
     try:
-        notion_client.api_token = token
-        result = notion_client.execute({"action": notion_hex.NotionAction.GET_ME, "params": {}})
-        return json.loads(result)
+        command = {"action": notion_hex.NotionAction.GET_ME, "params": {}, "token": token}
+        command_json = json.loads(notion_client.execute(command))
+        result = make_notion_request(command_json, token)
+        return result
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -307,9 +348,10 @@ async def get_notion_me(token: str = Depends(get_token)):
 async def create_notion_comment(comment_data: str = Form(...), token: str = Depends(get_token)):
     """Crea un comentario en Notion"""
     try:
-        notion_client.api_token = token
-        result = notion_client.execute({"action": notion_hex.NotionAction.CREATE_COMMENT, "params": {"comment_data": comment_data}})
-        return json.loads(result)
+        command = {"action": notion_hex.NotionAction.CREATE_COMMENT, "params": {"comment_data": comment_data}, "token": token}
+        command_json = json.loads(notion_client.execute(command))
+        result = make_notion_request(command_json, token)
+        return result
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -317,9 +359,10 @@ async def create_notion_comment(comment_data: str = Form(...), token: str = Depe
 async def get_notion_comments(page_id: str, token: str = Depends(get_token)):
     """Obtiene los comentarios de una página de Notion"""
     try:
-        notion_client.api_token = token
-        result = notion_client.execute({"action": notion_hex.NotionAction.GET_COMMENTS, "params": {"page_id": page_id}})
-        return json.loads(result)
+        command = {"action": notion_hex.NotionAction.GET_COMMENTS, "params": {"page_id": page_id}, "token": token}
+        command_json = json.loads(notion_client.execute(command))
+        result = make_notion_request(command_json, token)
+        return result
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 

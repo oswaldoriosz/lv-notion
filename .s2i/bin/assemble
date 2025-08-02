@@ -22,10 +22,17 @@ cd /tmp/src
 echo "Contenido de /tmp/src:"
 ls -la /tmp/src
 
+# List contents of /tmp/src/include for debugging
+echo "Contenido de /tmp/src/include:"
+ls -la /tmp/src/include
+echo "Contenido de /tmp/src/include/nlohmann:"
+ls -la /tmp/src/include/nlohmann || echo "Directorio /tmp/src/include/nlohmann no encontrado"
+
 # Create necessary directories
 mkdir -p /opt/app-root/src/cpp
 mkdir -p /opt/app-root/src/python
 mkdir -p /opt/app-root/src/wheels
+mkdir -p /opt/app-root/src/include/nlohmann
 
 # Copy Python files to /opt/app-root/src/python
 echo "Copiando archivos .py a /opt/app-root/src/python/"
@@ -42,6 +49,23 @@ if [ -d "/tmp/src/cpp" ]; then
     cp -r /tmp/src/cpp/* /opt/app-root/src/cpp/ || { echo "Error copiando directorio cpp"; exit 1; }
 else
     echo "Error: Directorio /tmp/src/cpp no encontrado"
+    exit 1
+fi
+
+# Copy include directory to /opt/app-root/src/include
+echo "Copiando directorio include a /opt/app-root/src/include/"
+if [ -d "/tmp/src/include" ]; then
+    cp -r /tmp/src/include/* /opt/app-root/src/include/ || { echo "Error copiando directorio include"; exit 1; }
+else
+    echo "Error: Directorio /tmp/src/include no encontrado"
+    exit 1
+fi
+
+# Verify nlohmann/json.hpp exists
+echo "Verificando presencia de /opt/app-root/src/include/nlohmann/json.hpp"
+ls -la /opt/app-root/src/include/nlohmann/ || echo "Directorio /opt/app-root/src/include/nlohmann no encontrado"
+if [ ! -f "/opt/app-root/src/include/nlohmann/json.hpp" ]; then
+    echo "Error: /opt/app-root/src/include/nlohmann/json.hpp no encontrado"
     exit 1
 fi
 

@@ -22,17 +22,47 @@ cd /tmp/src
 echo "Contenido de /tmp/src:"
 ls -la /tmp/src
 
-# Copy Python files to /opt/app-root/src
-echo "Copiando archivos .py a /opt/app-root/src/"
-cp -v /tmp/src/python/*.py /opt/app-root/src/python/ || echo "No se encontraron archivos .py en /tmp/src"
+# Create necessary directories
+mkdir -p /opt/app-root/src/cpp
+mkdir -p /opt/app-root/src/python
+mkdir -p /opt/app-root/src/wheels
 
-# Copy wheels directory to /opt/app-root/src
-echo "Copiando directorio wheels a /opt/app-root/src/"
-cp -r /tmp/src/wheels /opt/app-root/src/ || { echo "Error: No se encontró el directorio wheels en /tmp/src"; exit 1; }
+# Copy Python files to /opt/app-root/src/python
+echo "Copiando archivos .py a /opt/app-root/src/python/"
+if [ -d "/tmp/src/python" ]; then
+    cp -v /tmp/src/python/*.py /opt/app-root/src/python/ || echo "No se encontraron archivos .py en /tmp/src/python"
+else
+    echo "Directorio /tmp/src/python no encontrado, buscando .py en /tmp/src"
+    cp -v /tmp/src/*.py /opt/app-root/src/python/ || echo "No se encontraron archivos .py en /tmp/src"
+fi
+
+# Copy cpp directory to /opt/app-root/src/cpp
+echo "Copiando directorio cpp a /opt/app-root/src/cpp/"
+if [ -d "/tmp/src/cpp" ]; then
+    cp -r /tmp/src/cpp/* /opt/app-root/src/cpp/ || { echo "Error copiando directorio cpp"; exit 1; }
+else
+    echo "Error: Directorio /tmp/src/cpp no encontrado"
+    exit 1
+fi
+
+# Copy wheels directory to /opt/app-root/src/wheels
+echo "Copiando directorio wheels a /opt/app-root/src/wheels/"
+if [ -d "/tmp/src/wheels" ]; then
+    cp -r /tmp/src/wheels/* /opt/app-root/src/wheels/ || { echo "Error copiando directorio wheels"; exit 1; }
+else
+    echo "Error: Directorio /tmp/src/wheels no encontrado"
+    exit 1
+fi
+
+# Copy requirements.txt if exists
+if [ -f /tmp/src/requirements.txt ]; then
+    echo "Copiando requirements.txt a /opt/app-root/src/"
+    cp -v /tmp/src/requirements.txt /opt/app-root/src/
+fi
 
 # Install wheels from the wheels directory
 echo "Instalando dependencias desde los archivos .whl en /opt/app-root/src/wheels/"
-python3.12 -m pip install --no-index --find-links /opt/app-root/src/wheels/ -r /tmp/src/requirements.txt || { echo "Error installing Python dependencies from wheels"; exit 1; }
+python3.12 -m pip install --no-index --find-links /opt/app-root/src/wheels/ -r /opt/app-root/src/requirements.txt || { echo "Error installing Python dependencies from wheels"; exit 1; }
 
 # Compile notion_hex.so
 echo "Compilando notion_hex.so..."
@@ -44,6 +74,7 @@ g++ -shared -fPIC -o /opt/app-root/src/python/notion_hex.so \
     -I/opt/app-root/lib64/python3.12/site-packages/pybind11/include \
     -I/usr/include \
     -I/opt/app-root/src/include/nlohmann \
+    -I/opt/app-root/src/include/httplib \
     -L/opt/app-root/lib64 \
     -L/usr/lib64 \
     -std=c++17 \

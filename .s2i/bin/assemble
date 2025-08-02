@@ -97,8 +97,7 @@ g++ -shared -fPIC -o /opt/app-root/src/python/notion_hex.so \
     -I/usr/include/python3.12 \
     -I/opt/app-root/lib64/python3.12/site-packages/pybind11/include \
     -I/usr/include \
-    -I/opt/app-root/src/include/nlohmann \
-    -I/opt/app-root/src/include/httplib \
+    -I/opt/app-root/src/include \
     -L/opt/app-root/lib64 \
     -L/usr/lib64 \
     -std=c++17 \
